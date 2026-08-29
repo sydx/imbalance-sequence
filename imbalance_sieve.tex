@@ -1,0 +1,1367 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{microtype}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,
+            urlcolor=blue!50!black}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{algorithmx}[theorem]{Algorithm}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\DeclareMathOperator{\spf}{spf}
+\DeclareMathOperator{\rad}{rad}
+\DeclareMathOperator{\artanh}{artanh}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\isqrt}{\operatorname{isqrt}}
+\newcommand{\e}[1]{e\!\left(#1\right)}
+
+\title{The Imbalance Sieve:\\
+Enumeration, Novelty, and Spectral Structure of the Rationals}
+\author{Paul A. Bilokon\thanks{Thalesians Ltd and Department of Mathematics,
+Imperial College London. Email: \texttt{paul.bilokon@imperial.ac.uk}.}}
+\date{August 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+For integers $1 \le p < q$ define the \emph{imbalance}
+$\delta(p,q) = (q-p)/(q+p)$. Enumerating all such pairs by increasing $q$ and
+then increasing $p$ produces a single sequence of rationals. We develop this
+construction from first principles. The central object is the parity-adjusted
+map $\Phi(x,y) = (A(y-x),\,A(y+x))$, where $A(n) = n/\gcd(n,2)$: we prove it is
+an \emph{involution} on primitive pairs, and that consequently the passage
+between a lattice point and a reduced fraction, in either direction, requires no
+greatest common divisor. A value is \emph{novel} when it has not occurred
+earlier, and this happens exactly when its generating pair is coprime; the novel
+subsequence therefore enumerates $\Q \cap (0,1)$ bijectively, and is the Farey
+enumeration in imbalance coordinates. We give exact algorithms with proved
+complexity for every access pattern: positional access in $O(M(b))$, streaming
+in $O(1)$ amortised, the novelty mask to index $N$ in $O(N)$ without a single
+gcd, and ordinal access to the $n$-th novel term in $O(n^{1/3+\varepsilon})$.
+The scalar sequence satisfies an explicit second-order recurrence, and two is
+the minimal order. We show that the associated transition operator is the
+unilateral shift and is therefore spectrally trivial, and that the genuine
+spectral content lies in the emitted novelty mask: its Ramanujan expansion has
+frequency support exactly the divisor lattice of $\rad(q)$, its autocorrelation
+is a product over the primes dividing $q$, and its mean value is a
+Hardy--Littlewood-type singular series with $r^2$ in place of $r$, hence without
+parity obstruction. All results are accompanied by a verified reference
+implementation.
+\end{abstract}
+
+\tableofcontents
+
+\section{Introduction}
+
+\subsection{The coordinate}
+
+Given two positive quantities one may compare them by their difference, by their
+ratio, or by the normalised difference
+\begin{equation}\label{eq:imb}
+  \delta(p,q) \;=\; \frac{q-p}{q+p}, \qquad 1 \le p < q .
+\end{equation}
+The third is scale-free: it depends only on $p/q$, and determines it, since
+\begin{equation}\label{eq:inverse}
+  \frac{p}{q} \;=\; \frac{1-\delta}{1+\delta}.
+\end{equation}
+Thus $\delta$ is a M\"obius transform of the ratio, and indeed an involution of
+$(0,1)$: writing $\sigma(x) = (1-x)/(1+x)$ we have $\sigma \circ \sigma = \mathrm{id}$
+and $\delta(p,q) = \sigma(p/q)$. It is also a logarithmic coordinate,
+\begin{equation}\label{eq:artanh}
+  \log \frac{q}{p} \;=\; \log\frac{1+\delta}{1-\delta} \;=\; 2\artanh \delta,
+  \qquad |\delta| < 1,
+\end{equation}
+so that $\delta = \tanh\bigl(\tfrac12 \log(q/p)\bigr)$: the imbalance is the
+hyperbolic tangent of half the logarithmic distance between $p$ and $q$. This
+identity, exploited in Section~\ref{sec:metric}, is the reason the construction
+has a metric interpretation at all.
+
+The quantity is not exotic. In queueing and in market microstructure,
+$(q-p)/(q+p)$ is the standard normalised imbalance of two competing quantities;
+in relativity it is the rapidity coordinate; in elementary geometry, for
+symmetric endpoints $p = n-r$, $q = n+r$ it is simply $r/n$, so that consecutive
+odd integers $n-1, n+1$ have imbalance $1/n$.
+
+\subsection{What this paper does}
+
+We take the pairs $(p,q)$ with $1 \le p < q$, order them lexicographically by
+$q$ and then $p$, and study the resulting rational sequence
+$(\delta_i)_{i \ge 0}$. The questions are elementary and the answers are
+uniformly explicit:
+
+\begin{enumerate}
+  \item \emph{Where is a given term?} Section~\ref{sec:index} inverts the
+    triangular enumeration and gives an algorithm whose correctness rests on an
+    integer comparison rather than on a square root, so that a floating-point
+    seed cannot produce a wrong answer.
+  \item \emph{How is a term reduced?} Section~\ref{sec:involution} isolates the
+    parity adjustment $A$ and proves that $\Phi(x,y) = (A(y-x), A(y+x))$ is an
+    involution on primitive pairs. Reduction and its inverse are the same map.
+  \item \emph{When is a term new?} Section~\ref{sec:novelty} proves that a value
+    is novel precisely when its pair is coprime, identifies the novel
+    subsequence with the Farey enumeration, and records what this does and does
+    not say about primes.
+  \item \emph{Where does a given rational appear?} Section~\ref{sec:inverse}
+    gives the full trail of occurrence indices of a fixed value as an explicit
+    quadratic, and the fibres over a fixed numerator as interleaved quadratic
+    progressions.
+  \item \emph{Is the sequence self-generating?} Section~\ref{sec:recurrence}
+    exhibits an explicit second-order recurrence and proves two is minimal.
+  \item \emph{What is its spectrum?} Section~\ref{sec:spectral} shows the
+    transition operator is spectrally trivial and computes the genuine spectral
+    invariants of the emitted mask.
+  \item \emph{Which rationals are born in prime frontiers?}
+    Section~\ref{sec:partition} gives the criterion, the density, and the
+    Dirichlet decomposition, and shows the induced partition is invisible to the
+    natural limiting measure.
+  \item \emph{What metric does this induce on the primes?}
+    Section~\ref{sec:metric}.
+\end{enumerate}
+
+Section~\ref{sec:algorithms} collects the algorithms and their complexities,
+Section~\ref{sec:numerics} the numerical verification, and
+Section~\ref{sec:limits} an explicit account of what the construction does
+\emph{not} deliver.
+
+\subsection{Relation to classical enumerations}
+\label{sec:classical}
+
+The rationals have been enumerated many times: by Farey sequences
+\cite{Farey1816}, by the mediant constructions of Stern \cite{Stern1858} and
+Brocot \cite{Brocot1861}, and by the tree of Calkin and Wilf \cite{CalkinWilf2000}.
+The present enumeration is not new as a set-theoretic device, and we state its
+relation to the classical picture plainly in Proposition~\ref{prop:farey}: the
+novel terms of frontier at most $N$ correspond bijectively to the Farey
+fractions of order $N$ in $(0,1)$. What the imbalance coordinate contributes is
+not a new enumeration but an explicit, gcd-free, cost-symmetric \emph{addressing
+scheme} for it, together with the spectral invariants of
+Section~\ref{sec:spectral}.
+
+An earlier note by the author \cite{Bilokon2025} treated the unit-fraction case
+of Section~\ref{sec:inverse}. We take the opportunity to correct an error in it;
+see Remark~\ref{rem:erratum}.
+
+Background on elementary divisibility and the totient is in
+\cite{Apostol1976,HardyWright2008}; on integer arithmetic and square roots,
+\cite{BrentZimmermann2021}; on Ramanujan expansions,
+\cite{Ramanujan1918,Schwarz1994}; on sieve-theoretic context,
+\cite{IwaniecKowalski2004}.
+
+\section{The triangular enumeration}
+\label{sec:index}
+
+\subsection{Frontiers}
+
+\begin{definition}[Frontier]
+For $q \ge 2$, the \emph{$q$-th frontier} is the finite ordered list of pairs
+$(1,q), (2,q), \dots, (q-1,q)$, and the corresponding list of imbalances
+\[
+  I(q) \;=\; \left( \frac{q-1}{q+1},\ \frac{q-2}{q+2},\ \dots,\ \frac{1}{2q-1} \right).
+\]
+\end{definition}
+
+We order all pairs by frontier and, within a frontier, by increasing $p$:
+\begin{equation}\label{eq:order}
+  (1,2),\ (1,3),\ (2,3),\ (1,4),\ (2,4),\ (3,4),\ (1,5),\ \dots
+\end{equation}
+and write $(p_i,q_i)$ for the pair at index $i \ge 0$ and $\delta_i$ for its
+imbalance. Let $T_m = m(m+1)/2$.
+
+\begin{theorem}[Explicit index formula]\label{thm:index}
+For $i \ge 0$ put
+\begin{equation}\label{eq:mj}
+  m = m(i) = \left\lfloor \frac{\sqrt{8i+1}-1}{2} \right\rfloor,
+  \qquad j = j(i) = i - T_m .
+\end{equation}
+Then $0 \le j \le m$, and
+\begin{equation}\label{eq:pair}
+  (p_i, q_i) = (j+1,\ m+2), \qquad
+  \delta_i = \frac{m+1-j}{m+3+j}.
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Frontier $q$ contains $q-1$ pairs, so it occupies the index block
+$T_{q-2} \le i < T_{q-1}$. Hence $q_i = m+2$ where $m$ is determined by
+$T_m \le i < T_{m+1}$, and $p_i = j+1$ with $j = i - T_m$, giving
+$0 \le j \le m$. The condition $T_m \le i < T_{m+1}$ is
+$m(m+1) \le 2i < (m+1)(m+2)$, equivalent to
+$m \le (\sqrt{8i+1}-1)/2 < m+1$, which is~\eqref{eq:mj}. Substituting
+$p = j+1$, $q = m+2$ in~\eqref{eq:imb} gives~\eqref{eq:pair}.
+\end{proof}
+
+\begin{table}[t]
+\centering
+\caption{The first $28$ imbalances, in lowest terms, grouped by frontier.
+Repeated values are marked with a dagger; all others are first arrivals.}
+\label{tab:first}
+\begin{tabular}{cll}
+\toprule
+$q$ & indices & imbalance values \\
+\midrule
+$2$ & $0$ & $\tfrac13$ \\
+$3$ & $1$--$2$ & $\tfrac12,\ \tfrac15$ \\
+$4$ & $3$--$5$ & $\tfrac35,\ \tfrac13^\dagger,\ \tfrac17$ \\
+$5$ & $6$--$9$ & $\tfrac23,\ \tfrac37,\ \tfrac14,\ \tfrac19$ \\
+$6$ & $10$--$14$ & $\tfrac57,\ \tfrac12^\dagger,\ \tfrac13^\dagger,\ \tfrac15^\dagger,\ \tfrac1{11}$ \\
+$7$ & $15$--$20$ & $\tfrac34,\ \tfrac59,\ \tfrac25,\ \tfrac3{11},\ \tfrac16,\ \tfrac1{13}$ \\
+$8$ & $21$--$27$ & $\tfrac79,\ \tfrac35^\dagger,\ \tfrac5{11},\ \tfrac13^\dagger,\ \tfrac3{13},\ \tfrac17^\dagger,\ \tfrac1{15}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Exact positional access}
+
+Formula~\eqref{eq:mj} contains a square root, and a naive implementation
+computes $\lfloor \sqrt{8i+1} \rfloor$ exactly and then takes a further floor.
+This is the wrong place to demand exactness: the composite floor is fragile
+precisely at the triangular indices, where $8i+1 = (2m+1)^2$ is a perfect
+square, and those are exactly the indices at which each frontier begins. The
+following formulation moves the exactness requirement onto an integer
+comparison, so that the square root becomes a mere seed.
+
+\begin{theorem}[Seeded access with an integer certificate]\label{thm:seed}
+Let $i \ge 0$ and let $m$ be as in~\eqref{eq:mj}. Then
+\begin{equation}\label{eq:twocand}
+  m \in \bigl\{\, s-1,\ s \,\bigr\}, \qquad s := \isqrt(2i) = \lfloor \sqrt{2i} \rfloor,
+\end{equation}
+and $m = s$ if $T_s \le i$, and $m = s-1$ otherwise. Moreover, for
+\emph{any} integer seed $m_0 \ge 0$, the procedure
+\[
+  \textbf{while } m_0 > 0 \textbf{ and } T_{m_0} > i:\ m_0 \gets m_0 - 1;
+  \qquad
+  \textbf{while } T_{m_0+1} \le i:\ m_0 \gets m_0 + 1
+\]
+terminates after exactly $|m_0 - m|$ steps and returns $m$.
+\end{theorem}
+
+\begin{proof}
+From $T_m \le i$ we get $m^2 \le m(m+1) \le 2i$, hence $m \le s$. From
+$i < T_{m+1}$ we get $2i < (m+1)(m+2) < (m+2)^2$, hence $s < m+2$, i.e.
+$s \le m+1$. Together, $m \in \{s-1, s\}$, and the case is decided by whether
+$T_s \le i$. For the second claim, the map $m \mapsto T_m$ is strictly
+increasing on $\N$, so the predicate $T_{m_0} \le i$ is monotone in $m_0$; each
+loop moves $m_0$ one step towards the unique $m$ satisfying
+$T_m \le i < T_{m+1}$, and neither loop can overshoot it.
+\end{proof}
+
+\begin{remark}
+Theorem~\ref{thm:seed} separates correctness from cost. Correctness follows from
+two multiplications and a comparison and holds for any seed whatsoever; the seed
+quality only affects the number of correction steps. In particular a
+double-precision seed $m_0 = \lfloor(\sqrt{8i+1}-1)/2\rfloor$ computed in
+floating point is safe at any magnitude, and is within one of $m$ whenever the
+conversion of $8i+1$ is exact, i.e. for $i < 2^{50}$.
+\end{remark}
+
+\begin{remark}[Comparison with a prescribed Babylonian count]
+One may instead compute $\lfloor \sqrt{N} \rfloor$, $N = 8i+1$, by the integer
+Babylonian iteration $B_N(x) = \min\{x, \lfloor (x + \lfloor N/x \rfloor)/2\rfloor\}$
+started at $x_0 = N$; a standard error-halving argument shows
+$\lceil \log_2 N\rceil + 1$ iterations suffice. Each iteration contains a
+full-width division, so this costs $O(b\,M(b))$ with $b = \log N$, a factor $b$
+more than necessary. Seeding at $x_0 = 2^{\lceil b/2\rceil}$ instead reduces the
+count to $\lceil \log_2 b \rceil + 2$ by quadratic convergence, and the recursive
+algorithm of \cite[Alg.~1.12]{BrentZimmermann2021} attains $O(M(b))$ outright.
+Theorem~\ref{thm:seed} sidesteps the question by not requiring an exact root at
+all.
+\end{remark}
+
+\begin{corollary}[Streaming]\label{cor:stream}
+Define $F(p,q) = (p+1, q)$ if $p < q-1$ and $F(q-1,q) = (1, q+1)$. Then
+$(p_{i+1}, q_{i+1}) = F(p_i, q_i)$, so consecutive terms are generated in $O(1)$
+integer operations each, with no square root and no division.
+\end{corollary}
+
+\begin{proof}
+Immediate from the ordering~\eqref{eq:order}: within frontier $q$ the index
+advances $p$ by one, and at $p = q-1$ the frontier is exhausted and the next
+begins at $(1,q+1)$.
+\end{proof}
+
+\section{The parity involution}
+\label{sec:involution}
+
+\subsection{The adjustment \texorpdfstring{$A$}{A}}
+
+\begin{definition}\label{def:A}
+Let
+\[
+  A(n) \;=\; \frac{n}{\gcd(n,2)} \;=\;
+  \begin{cases} n, & n \text{ odd},\\ n/2, & n \text{ even}.\end{cases}
+\]
+This is OEIS \texttt{A026741} \cite{OEIS_A026741}.
+\end{definition}
+
+\begin{proposition}[Lowest-term formula]\label{prop:lowest}
+Let $1 \le p < q$ and $h = \gcd(p,q)$. Then the lowest-term numerator and
+denominator of $\delta(p,q)$ are
+\begin{equation}\label{eq:lowest}
+  \operatorname{num} \delta(p,q) = A\!\left(\frac{q-p}{h}\right), \qquad
+  \operatorname{den} \delta(p,q) = A\!\left(\frac{q+p}{h}\right).
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Write $p = ha$, $q = hb$ with $\gcd(a,b) = 1$. Then
+$\delta(p,q) = (b-a)/(b+a)$. Any common divisor $c$ of $b-a$ and $b+a$ divides
+their sum $2b$ and their difference $2a$, hence divides $\gcd(2a,2b) = 2$. So
+$c \in \{1,2\}$, and $c = 2$ occurs exactly when $b-a$ and $b+a$ are both even,
+i.e. when $a$ and $b$ are both odd. Applying $A$ to each of $b-a$ and $b+a$
+removes precisely this common factor of two when it is present and does nothing
+otherwise.
+\end{proof}
+
+\subsection{The involution}
+
+Call a pair $(x,y)$ with $0 < x < y$ \emph{primitive} if $\gcd(x,y) = 1$.
+
+\begin{theorem}[$\Phi$ is an involution]\label{thm:involution}
+Define $\Phi(x,y) = \bigl(A(y-x),\, A(y+x)\bigr)$. Then $\Phi$ maps primitive
+pairs to primitive pairs, and $\Phi \circ \Phi = \mathrm{id}$.
+\end{theorem}
+
+\begin{proof}
+Let $(x,y)$ be primitive and set $(u,v) = \Phi(x,y)$. Two cases.
+
+\emph{Case 1: $x, y$ both odd.} Then $y-x$ and $y+x$ are even and
+$(u,v) = \bigl(\tfrac{y-x}{2}, \tfrac{y+x}{2}\bigr)$, so $v-u = x$ and
+$v+u = y$. Any common divisor of $u$ and $v$ divides $u+v = y$ and $v-u = x$,
+hence divides $\gcd(x,y) = 1$; and $0 < u < v$ since $0 < x < y$. So $(u,v)$ is
+primitive. Moreover $u + v = y$ is odd, so $u,v$ have opposite parity, and
+therefore
+\[
+  \Phi(u,v) = \bigl(A(v-u), A(v+u)\bigr) = \bigl(A(x), A(y)\bigr) = (x,y),
+\]
+because $x$ and $y$ are odd.
+
+\emph{Case 2: $x, y$ of opposite parity.} Then $y-x$ and $y+x$ are both odd and
+$(u,v) = (y-x, y+x)$. Any common divisor $c$ of $u,v$ is odd and divides
+$u+v = 2y$ and $v-u = 2x$, hence divides $\gcd(x,y) = 1$. Again $0<u<v$, so
+$(u,v)$ is primitive, and both are odd, so
+\[
+  \Phi(u,v) = \bigl(A(v-u), A(v+u)\bigr) = \bigl(A(2x), A(2y)\bigr) = (x,y). \qedhere
+\]
+\end{proof}
+
+Theorem~\ref{thm:involution} is the structural core of the paper. It says that
+the passage from a primitive lattice point to a reduced fraction and the passage
+back are \emph{the same map}, and that this map costs one subtraction, one
+addition, one parity test and one shift. Everything gcd-free in what follows is
+a consequence.
+
+\begin{corollary}[Free reduction at coprime pairs]\label{cor:free}
+If $\gcd(p,q) = 1$ then the lowest-term form of $\delta(p,q)$ is $\Phi(p,q)$,
+computable in $O(b)$ bit operations, $b = \log q$, with no gcd. If
+$\gcd(p,q) = h > 1$ then the scale $h$ itself is required
+by~\eqref{eq:lowest}, and testing $h = 1$ does not suffice.
+\end{corollary}
+
+\begin{example}
+At index $i = 12$ the pair is $(3,6)$, so $h = 3$ and the reduced value is
+$1/3$; but $\Phi(3,6) = (A(3), A(9)) = (3,9)$, which is not reduced. Applying
+$\Phi$ without checking coprimality is therefore incorrect in general. At
+$i = 4$, with pair $(2,4)$ and $h = 2$, it happens to be correct, because $A$
+removes exactly the factor $2$ that $h$ would have removed.
+\end{example}
+
+\section{Novelty}
+\label{sec:novelty}
+
+\begin{definition}[Novelty]
+The term $\delta_i$ is \emph{novel} if $\delta_i \notin \{\delta_0, \dots,
+\delta_{i-1}\}$. Write $\nu_i = \mathbf{1}\{\delta_i \text{ novel}\}$ for the
+\emph{novelty mask}.
+\end{definition}
+
+\begin{theorem}[Novelty criterion]\label{thm:novelty}
+For every $i \ge 0$,
+\[
+  \nu_i = 1 \iff \gcd(p_i, q_i) = 1 .
+\]
+Equivalently, the set of pairs decomposes as a disjoint union of dilation rays
+$(p,q) = k\,(P,Q)$ with $(P,Q)$ primitive and $k \ge 1$, and only $k = 1$ is
+novel.
+\end{theorem}
+
+\begin{proof}
+By~\eqref{eq:inverse}, $\delta(p_1,q_1) = \delta(p_2,q_2)$ if and only if
+$p_1/q_1 = p_2/q_2$. Each ratio in $(0,1)$ has a unique primitive representative
+$(P,Q)$, and the pairs with that ratio are exactly $k(P,Q)$, $k \ge 1$. Since
+the ordering~\eqref{eq:order} is by increasing upper coordinate and $Q < kQ$ for
+$k > 1$, the primitive pair occurs strictly before all its dilates. Hence a term
+is a first occurrence exactly when its pair is primitive.
+\end{proof}
+
+\begin{corollary}[Bijection with the rationals]\label{cor:bijection}
+The novel subsequence enumerates $\Q \cap (0,1)$, each value exactly once. The
+full sequence enumerates each value countably often, along its dilation ray.
+\end{corollary}
+
+\begin{proof}
+By Theorem~\ref{thm:novelty} the novel terms correspond bijectively to primitive
+pairs $(P,Q)$, $0 < P < Q$; by Theorem~\ref{thm:involution} these correspond
+bijectively to reduced fractions in $(0,1)$, via $\Phi$.
+\end{proof}
+
+\begin{remark}[Erratum to \cite{Bilokon2025}]\label{rem:erratum}
+Section~6.2 of \cite{Bilokon2025} asserts that
+$\Phi(p,q) = (p-q)/(p+q)$ is injective on all pairs $p > q > 0$. It is not: the
+proof correctly derives $p_1 q_2 = p_2 q_1$ and hence proportionality, but then
+asserts the proportionality constant is $1$, which does not follow. The
+counterexample $\delta(2,1) = \delta(4,2) = 1/3$ appears in that paper's own
+Appendix~A. The correct statement is injectivity on \emph{primitive} pairs,
+which is Theorem~\ref{thm:novelty} above, and it is what the surjectivity
+argument of that section needs.
+\end{remark}
+
+\subsection{Relation to the Farey enumeration}
+
+\begin{proposition}[The novel terms are Farey]\label{prop:farey}
+For $N \ge 2$, the novel terms with frontier at most $N$ are in bijection, via
+$\Phi$, with the Farey fractions of order $N$ lying in the open interval
+$(0,1)$. Consequently their number is
+\[
+  \sum_{q=2}^{N} \varphi(q) \;=\; \Phi_\Sigma(N) - 1,
+  \qquad \Phi_\Sigma(N) := \sum_{q \le N} \varphi(q) ,
+\]
+and the natural density of novel indices is
+\[
+  \lim_{N \to \infty} \frac{\Phi_\Sigma(N)-1}{T_{N-1}}
+  \;=\; \frac{6}{\pi^2}.
+\]
+\end{proposition}
+
+\begin{proof}
+Novel terms with frontier at most $N$ correspond to primitive pairs
+$0 < p < q \le N$, i.e. to reduced fractions $p/q \in (0,1)$ with $q \le N$,
+which is the definition of $F_N \cap (0,1)$. The count is
+$\sum_{q\le N}\varphi(q)$ less the term $\varphi(1) = 1$. The density follows
+from $\Phi_\Sigma(N) = 3N^2/\pi^2 + O(N\log N)$ and $T_{N-1} \sim N^2/2$.
+\end{proof}
+
+So the construction is the Farey enumeration in imbalance coordinates. What is
+added is the addressing: Section~\ref{sec:inverse} gives the index of a
+prescribed fraction in closed form, which the mediant constructions do not.
+
+\subsection{Arithmetic read-outs}
+
+\begin{corollary}[Blockwise arithmetic]\label{cor:arith}
+For every $q \ge 2$,
+\begin{equation}\label{eq:phi}
+  \varphi(q) \;=\; \sum_{i=T_{q-2}}^{T_{q-1}-1} \nu_i,
+\end{equation}
+and
+\begin{equation}\label{eq:prime}
+  q \text{ is prime} \iff \nu_i = 1 \text{ for all } T_{q-2} \le i < T_{q-1}.
+\end{equation}
+If $q$ is composite then
+\begin{equation}\label{eq:spf}
+  \spf(q) \;=\; \min\{\,p \ge 2 \;:\; \nu_{T_{q-2}+p-1} = 0 \,\}.
+\end{equation}
+\end{corollary}
+
+\begin{proof}
+The frontier $q$ consists of the pairs $(p,q)$, $1 \le p < q$, and by
+Theorem~\ref{thm:novelty} the novel ones are those with $\gcd(p,q) = 1$; there
+are $\varphi(q)$ of them, giving~\eqref{eq:phi}. All are novel exactly when
+every $p < q$ is coprime to $q$, i.e. $q$ is prime, giving~\eqref{eq:prime}. If
+$q$ is composite, the least $p \ge 2$ with $\gcd(p,q) > 1$ is the least prime
+factor of $q$, giving~\eqref{eq:spf}.
+\end{proof}
+
+\begin{remark}[What Corollary~\ref{cor:arith} does and does not say]
+\label{rem:honest}
+Each of \eqref{eq:phi}--\eqref{eq:spf} is an exact identity, and iterating
+\eqref{eq:spf} recovers the full factorisation of every frontier label. It is
+important to be clear that this is a change of representation and not a
+computational advance: $\nu$ is \emph{defined} through $\gcd$, so possessing the
+mask is not cheaper than possessing the factorisations it encodes. What is
+genuine is the cost statement in the other direction --- the mask can be
+generated from a smallest-prime-factor sieve at $O(1)$ amortised cost per entry,
+with no gcd at all (Algorithm~\ref{alg:mask} and Theorem~\ref{thm:masklinear}),
+so the two representations are interconvertible at known cost. Similarly, with
+$C(q) = \prod_{i=T_{q-2}}^{T_{q-1}-1}\nu_i$ we have the exact equivalence
+\[
+  q,\, q+2 \text{ both prime} \iff C(q)\,C(q+2) = 1,
+\]
+but this is a restatement of the twin prime conjecture in different notation,
+and confers no leverage on it.
+\end{remark}
+
+\subsection{Imbalance trails}
+
+The frontier admits a description in terms of numerators which makes the
+appearance of $A$ transparent.
+
+\begin{definition}[Imbalance trail]
+For $q \ge 2$ the \emph{trail} of $q$ is the sequence $\tau_k(q) = \delta(q-k,q)$
+for $k = 1, \dots, q-1$, in lowest terms, with reduced numerator $A_k(q)$.
+\end{definition}
+
+\begin{proposition}[Prime trail pattern]\label{prop:trail}
+Let $q \ge 5$. Then $q$ is prime if and only if
+\begin{equation}\label{eq:trail}
+  A_k(q) = A(k) =
+  \begin{cases} k, & k \text{ odd},\\ k/2, & k \text{ even},\end{cases}
+  \qquad 1 \le k \le q-1 .
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Here $p = q - k$, so $q - p = k$ and $q + p = 2q - k$, and
+$h = \gcd(q-k, q) = \gcd(k,q)$. By Proposition~\ref{prop:lowest},
+$A_k(q) = A(k/h)$. If $q$ is prime then for $1 \le k \le q-1$ we have
+$q \nmid k$, so $h = 1$ and $A_k(q) = A(k)$, which is~\eqref{eq:trail}.
+Conversely, if $q$ is composite let $r = \spf(q) \le q-1$; then $h = \gcd(r,q) = r$
+and $A_r(q) = A(1) = 1 \ne A(r)$ since $r \ge 2$. Hence~\eqref{eq:trail} fails
+at $k = r$.
+\end{proof}
+
+Thus the numerator sequence of a prime trail is the initial segment of
+\texttt{A026741}, and the first deviation of a composite trail occurs at
+$k = \spf(q)$. This is~\eqref{eq:prime} and~\eqref{eq:spf} read numerator-wise;
+it is the same content, and it explains why $A$ is the right adjustment to have
+introduced in Definition~\ref{def:A}.
+
+\begin{remark}
+Checking~\eqref{eq:trail} for all $k$ is trial division: the condition
+$\gcd(k,q) \in \{1,2\}$ for all $k < q$ is exactly the statement that no
+$k < q$ shares an odd factor with $q$, and the first violation is at
+$k = \spf(q)$. The trail formulation is a reinterpretation of trial division, of
+the same worst-case cost $\widetilde{O}(\sqrt q)$ and the same
+polylogarithmic average cost, not a new primality test.
+\end{remark}
+
+\section{Inverse indexing}
+\label{sec:inverse}
+
+\subsection{Occurrence trails}
+
+\begin{proposition}[Occurrence indices]\label{prop:occ}
+Let $a/b \in (0,1)$ be reduced, and set $(P,Q) = \Phi(a,b) = (A(b-a), A(b+a))$.
+Then $(P,Q)$ is the unique primitive pair with $\delta(P,Q) = a/b$, the pairs
+producing $a/b$ are exactly $(kP, kQ)$ for $k \ge 1$, and the $k$-th occurrence
+has index
+\begin{equation}\label{eq:occ}
+  i_k \;=\; T_{kQ-2} + kP - 1 \;=\; \frac{k^2 Q^2 + k(2P - 3Q)}{2}.
+\end{equation}
+In particular the unique novel occurrence is
+\begin{equation}\label{eq:novidx}
+  i_{\mathrm{nov}} \;=\; \frac{Q^2 + 2P - 3Q}{2}.
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Solving $(q-p)/(q+p) = a/b$ gives $p/q = (b-a)/(b+a)$. By the argument of
+Proposition~\ref{prop:lowest} the only possible common factor of $b-a$ and
+$b+a$ is $2$, removed exactly by $A$; hence $(P,Q) = \Phi(a,b)$ is primitive and
+generates $a/b$, and it is unique by Theorem~\ref{thm:involution}. All integer
+solutions are its dilates. The pair $(kP,kQ)$ lies at index
+$T_{kQ-2} + kP - 1$ by Theorem~\ref{thm:index}; expanding
+$T_{kQ-2} = (k^2Q^2 - 3kQ + 2)/2$ gives~\eqref{eq:occ}. Novelty at $k=1$ is
+Theorem~\ref{thm:novelty}.
+\end{proof}
+
+\begin{corollary}[Constant second difference]\label{cor:seconddiff}
+The occurrence indices of a fixed reduced $a/b$ satisfy
+\[
+  i_{k+2} - 2 i_{k+1} + i_k \;=\; Q^2 ,
+\]
+and $\#\{k : i_k \le x\} = \sqrt{2x}/Q + O(1)$.
+\end{corollary}
+
+\begin{proof}
+Both follow from~\eqref{eq:occ}, a quadratic in $k$ with leading coefficient
+$Q^2/2$.
+\end{proof}
+
+\begin{example}\label{ex:trails}
+The first three occurrence trails are
+\[
+\begin{aligned}
+  \mathrm{Occ}(1/3) &: \ i_k = 2k(k-1) = 0, 4, 12, 24, 40, \dots \\
+  \mathrm{Occ}(1/2) &: \ i_k = \tfrac{9k^2 - 7k}{2} = 1, 11, 30, 58, 95, \dots \\
+  \mathrm{Occ}(3/5) &: \ i_k = 8k^2 - 5k = 3, 22, 57, 108, 175, \dots
+\end{aligned}
+\]
+with second differences $4, 9, 16$, the squares of the primitive upper
+coordinates $2, 3, 4$.
+\end{example}
+
+\subsection{Fixed numerator}
+
+Fixing the numerator and letting the denominator vary gives a finite family of
+quadratic progressions.
+
+\begin{theorem}[Interleaved progressions]\label{thm:progressions}
+Fix $a \ge 1$ and let $b$ range over integers $b > a$ with $\gcd(a,b) = 1$. Put
+$M = 2\rad(a)$. Then the residue of $b$ modulo $M$ takes exactly
+$2\varphi(\rad(a))$ admissible values, and on each such residue class the novel
+index of $a/b$ is a quadratic polynomial in $b$, namely
+\begin{equation}\label{eq:prog}
+  i_{\mathrm{nov}}(a,b) =
+  \begin{dcases}
+    \frac{(b+a)^2 + 4(b-a) - 6(b+a)}{8}, & a, b \text{ both odd},\\[4pt]
+    \frac{(b+a)^2 + 2(b-a) - 3(b+a)}{2}, & a, b \text{ of opposite parity}.
+  \end{dcases}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Coprimality of $a$ and $b$ depends only on $b \bmod \rad(a)$, and holds for
+$\varphi(\rad(a))$ residues modulo $\rad(a)$; refining modulo $M = 2\rad(a)$
+doubles this to $2\varphi(\rad(a))$ classes, on each of which the parity of $b$
+is constant. By Proposition~\ref{prop:occ}, $i_{\mathrm{nov}} = (Q^2 + 2P - 3Q)/2$
+with $(P,Q) = ((b-a)/\varepsilon, (b+a)/\varepsilon)$ and $\varepsilon = 2$ when
+$a,b$ are both odd and $\varepsilon = 1$ otherwise. Substituting gives the two
+displayed expressions, each a quadratic in $b$.
+\end{proof}
+
+\begin{corollary}[Unit fractions]\label{cor:unit}
+For $a = 1$ there are exactly two classes, and
+\[
+  i_{\mathrm{nov}}(1,d) =
+  \begin{cases} \dfrac{d^2-9}{8}, & d \text{ odd},\\[6pt]
+                \dfrac{d(d+1)}{2} - 2, & d \text{ even}.\end{cases}
+\]
+Moreover $1/d$ is the first novel imbalance with reduced denominator $d$, with
+primitive pair $(P_d,Q_d) = (d-1,d+1)$ for $d$ even and
+$\bigl(\tfrac{d-1}{2},\tfrac{d+1}{2}\bigr)$ for $d$ odd.
+\end{corollary}
+
+\begin{proof}
+$\rad(1) = 1$, so $2\varphi(\rad(1)) = 2$ and the two classes are the parities of
+$d$; substituting $a=1$ in~\eqref{eq:prog} gives the displayed formulas. For the
+second claim, a reduced $a/d$ has primitive upper coordinate $Q = A(d+a)$ by
+Proposition~\ref{prop:occ}, and by~\eqref{eq:occ} its novel index is increasing
+in $Q$ for fixed parity class. If $d$ is even then $a$ is odd and
+$A(d+a) = d+a$, minimised uniquely at $a=1$. If $d$ is odd and $a$ is odd then
+$A(d+a) = (d+a)/2$, again minimised at $a=1$, and any even $a$ gives the larger
+value $d+a \ge d+2 > (d+1)/2$. Substituting $a=1$ yields the stated pairs.
+\end{proof}
+
+Corollary~\ref{cor:unit} is Theorem 5.1 of \cite{Bilokon2025}, recovered here as
+the case $a = 1$ of Theorem~\ref{thm:progressions}.
+
+\section{A second-order recurrence}
+\label{sec:recurrence}
+
+The sequence $(\delta_i)$ is generated by the deterministic map $F$ of
+Corollary~\ref{cor:stream} acting on the pair $(p,q)$. That pair is, however,
+merely the index in disguise: Theorem~\ref{thm:index} is a bijection between $i$
+and $(p_i, q_i)$. A more informative statement is that the scalar sequence
+regenerates itself from its own past.
+
+\begin{theorem}[Order two, and no less]\label{thm:order2}
+For $i \ge 1$ the pair $(p_i, q_i)$ is determined by $\delta_{i-1}$ and
+$\delta_i$ alone:
+\begin{equation}\label{eq:recover}
+  (p_i, q_i) =
+  \begin{dcases}
+    \left( q\,\frac{1-\delta_i}{1+\delta_i},\ q \right),\quad
+      q = \frac{(1+\delta_i)(1+\delta_{i-1})}{2(\delta_{i-1}-\delta_i)},
+      & \delta_i < \delta_{i-1},\\[6pt]
+    \left( 1,\ \frac{1+\delta_i}{1-\delta_i} \right), & \delta_i > \delta_{i-1}.
+  \end{dcases}
+\end{equation}
+Consequently there is an explicit $G : \Q^2 \to \Q$ with
+$\delta_{i+1} = G(\delta_{i-1}, \delta_i)$ for all $i \ge 1$. No first-order
+recurrence exists: $\delta$ alone is not a state.
+\end{theorem}
+
+\begin{proof}
+Write $x_i = p_i/q_i = \sigma(\delta_i)$. Within a frontier, $p$ increases by
+one at fixed $q$, so $x_i - x_{i-1} = 1/q_i > 0$ and hence
+$\delta_i < \delta_{i-1}$, since $\sigma$ is strictly decreasing. At a frontier
+boundary, $\delta$ jumps from $1/(2q-1)$ to $q/(q+2)$, and
+$q/(q+2) > 1/(2q-1)$ for $q \ge 2$, so $\delta_i > \delta_{i-1}$. The two cases
+are therefore distinguished by the sign of $\delta_i - \delta_{i-1}$, which
+never vanishes.
+
+In the first case,
+\[
+  x_i - x_{i-1}
+  = \frac{1-\delta_i}{1+\delta_i} - \frac{1-\delta_{i-1}}{1+\delta_{i-1}}
+  = \frac{2(\delta_{i-1}-\delta_i)}{(1+\delta_i)(1+\delta_{i-1})}
+  = \frac{1}{q_i},
+\]
+which inverts to the stated $q$, and then $p_i = q_i x_i$. In the second case
+$p_i = 1$ and $\delta_i = (q_i-1)/(q_i+1)$ inverts to $q_i = (1+\delta_i)/(1-\delta_i)$.
+Applying $F$ to the recovered pair and taking the imbalance gives $G$.
+
+For minimality, $\delta_0 = \delta_4 = 1/3$ while $\delta_1 = 1/2$ and
+$\delta_5 = 1/7$: equal terms with unequal successors, so no function of
+$\delta_i$ alone can determine $\delta_{i+1}$.
+\end{proof}
+
+\begin{remark}
+The analogy is with the Fibonacci recurrence, where the augmented state
+$(F_n, F_{n+1})$ is built from the sequence's own outputs. Theorem~\ref{thm:order2}
+is the correct analogue: the scale information apparently destroyed by reduction
+is recovered from one additional observation. This also sharpens the applied
+reading of $\delta$ as a normalised queue imbalance: two consecutive readings
+determine the underlying integer pair, whereas one does not.
+\end{remark}
+
+\section{Spectral structure}
+\label{sec:spectral}
+
+\subsection{Why the transition operator is uninformative}
+
+\begin{proposition}[Degeneracy of the transition spectrum]\label{prop:degenerate}
+Let $X_i = (p_i,q_i)$ with $X_{i+1} = F(X_i)$. Then $(X_i)$ is a
+time-homogeneous deterministic Markov chain on a countable state space; its
+transition operator $(\mathcal{P}f)(x) = f(F(x))$ acting on $\ell^2$ is
+unitarily equivalent to the \emph{backward} unilateral shift $S^*$.
+Consequently $\sigma(\mathcal{P}) = \overline{\mathbb{D}}$, every
+$\lambda$ in the open unit disc is an eigenvalue of $\mathcal{P}$, the adjoint
+$\mathcal{P}^* = S$ has no eigenvalues at all, and the chain admits no non-zero
+invariant measure. The same holds for the induced chains on the novel
+subsequence and on the novel indices.
+\end{proposition}
+
+\begin{proof}
+By Theorem~\ref{thm:index} the state space is in bijection with $\N$ under
+$i \leftrightarrow (p_i,q_i)$, and under this bijection $F$ is $i \mapsto i+1$;
+hence $(\mathcal{P}f)_i = f_{i+1}$, which is $S^*$. The equation
+$S^* f = \lambda f$ gives $f_i = \lambda^i f_0$, which lies in $\ell^2$ for
+every $|\lambda| < 1$, so the point spectrum of $\mathcal{P}$ is the open disc;
+the spectrum is closed and contained in the unit ball, hence equals
+$\overline{\mathbb{D}}$. For $S$, the equation $Sf = \lambda f$ forces
+$f_0 = 0$ and then $f_i = 0$ for all $i$, so $S$ has no eigenvalues. Finally
+$F$ is injective with $(1,2)$ outside its image, so $\mu = \mu \circ F^{-1}$
+forces $\mu(\{(1,2)\}) = 0$, and then inductively $\mu(\{F^n(1,2)\}) = 0$ for
+every $n$; on a countable state space this gives $\mu \equiv 0$. Restricting to
+a subsequence replaces $F$ by a first-return map, which is again an injective
+shift on a countable set.
+\end{proof}
+
+The degeneracy is thus as complete as it could be: the spectrum is the largest
+it can possibly be, and every point of its interior is an eigenvalue, so no
+spectral quantity distinguishes this sequence from any other.
+
+Every deterministic sequence, over any alphabet, has this transition spectrum:
+take the state space $\N$, the map $i \mapsto i+1$, and the emission
+$i \mapsto a_i$. No ergodic, mixing or spectral-gap statement is available or
+meaningful here. The spectral content of the construction lies entirely in the
+\emph{emissions}, and is almost periodic rather than dynamical. We compute it
+now.
+
+\subsection{Ramanujan expansion of the novelty mask}
+
+Fix a frontier $q$ and regard $\nu$ as the function
+$\nu(p) = \mathbf{1}\{\gcd(p,q) = 1\}$ on $\Z/q$. Write
+$\e{t} = \exp(2\pi i t)$ and let
+$c_d(k) = \sum_{\substack{1\le t \le d,\ \gcd(t,d)=1}} \e{tk/d}$
+be the Ramanujan sum, so that $c_d(k) = \mu(d/g)\varphi(d)/\varphi(d/g)$ with
+$g = \gcd(k,d)$.
+
+\begin{theorem}[Ramanujan expansion]\label{thm:ramanujan}
+For every $q \ge 2$ and every $p$,
+\begin{equation}\label{eq:ram}
+  \nu(p) \;=\; \frac{\varphi(q)}{q} \sum_{d \mid q} \frac{\mu(d)}{\varphi(d)}\, c_d(p).
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The finite Fourier coefficients of $\nu$ on $\Z/q$ are
+\[
+  \widehat\nu(k) = \frac1q \sum_{p \bmod q} \nu(p)\, \e{-pk/q}
+  = \frac1q \sum_{\gcd(p,q)=1} \e{-pk/q} = \frac{c_q(k)}{q},
+\]
+using that $c_q$ is real and even. Hence
+$\nu(p) = q^{-1}\sum_{k \bmod q} c_q(k) \e{pk/q}$. Group the $k$ by
+$g = \gcd(k,q)$ and put $d = q/g$. For fixed $g$, writing $k = g k'$ with
+$\gcd(k', d) = 1$,
+\[
+  \sum_{\gcd(k,q) = g} \e{pk/q} = \sum_{\substack{k' \bmod d \\ \gcd(k',d)=1}} \e{pk'/d} = c_d(p),
+\]
+while $c_q(k) = \mu(d)\varphi(q)/\varphi(d)$ is constant on that class. Summing
+over $d \mid q$ gives~\eqref{eq:ram}.
+\end{proof}
+
+\begin{corollary}[The spectrum sees only the radical]\label{cor:radical}
+The frequency support of~\eqref{eq:ram} is
+$\{ d : d \mid \rad(q) \}$, of size $2^{\omega(q)}$, and the amplitudes
+$\varphi(q)\mu(d)/(q\varphi(d))$ depend only on $\rad(q)$, since
+$\varphi(q)/q = \prod_{r \mid q}(1 - 1/r)$. In particular the masks of $q$ and
+of $\rad(q)$ have identical spectra. Moreover, given the frontier label $q$
+(which is determined by the frontier length),
+\[
+  q \text{ is prime} \iff \text{the support is } \{1, q\}.
+\]
+\end{corollary}
+
+\begin{proof}
+$\mu(d) = 0$ unless $d$ is squarefree, and the squarefree divisors of $q$ are
+the divisors of $\rad(q)$. The stated dependence of the amplitudes is immediate.
+The divisors of $\rad(q)$ are $\{1,q\}$ exactly when $q$ is prime: if $q = r^e$
+with $e \ge 2$ they are $\{1,r\} \ne \{1,q\}$, and if $q$ has at least two
+distinct prime factors there are at least four.
+\end{proof}
+
+Corollary~\ref{cor:radical} explains why~\eqref{eq:spf} requires a recursion:
+multiplicities are invisible to a single frontier's spectrum.
+
+\subsection{Autocorrelation}
+
+\begin{theorem}[Exact autocorrelation]\label{thm:autocorr}
+For $q \ge 2$ and $h \in \Z$ let
+$R_q(h) = q^{-1} \#\{ p \bmod q : \gcd(p,q) = \gcd(p+h,q) = 1 \}$. Then
+\begin{equation}\label{eq:autocorr}
+  R_q(h) \;=\; \prod_{r \mid \gcd(h,q)} \left(1 - \frac1r\right)
+               \prod_{\substack{r \mid q \\ r \nmid h}} \left(1 - \frac2r\right),
+\end{equation}
+the products being over primes.
+\end{theorem}
+
+\begin{proof}
+By the Chinese remainder theorem the count factorises over the prime powers
+$r^e \,\|\, q$. Modulo $r^e$, the condition is $r \nmid p$ and $r \nmid p+h$. If
+$r \mid h$ these coincide and the count is $r^e(1-1/r)$. If $r \nmid h$ they
+exclude two distinct residues mod $r$, giving $r^e(1-2/r)$. Multiplying and
+dividing by $q$ gives~\eqref{eq:autocorr}.
+\end{proof}
+
+\begin{corollary}
+$R_q(0) = \varphi(q)/q$; and if $q$ is even and $h$ is odd then $R_q(h) = 0$,
+since the factor at $r=2$ vanishes.
+\end{corollary}
+
+\subsection{The singular series}
+
+\begin{theorem}[Mean value]\label{thm:singular}
+For fixed $h$, the multiplicative function $q \mapsto R_q(h)$ has mean value
+\begin{equation}\label{eq:sing}
+  \mathfrak{S}(h) \;=\; \prod_{r \mid h}\left(1 - \frac{1}{r^2}\right)
+                        \prod_{r \nmid h}\left(1 - \frac{2}{r^2}\right),
+\end{equation}
+and consequently
+\[
+  \sum_{q \le Q} q\,R_q(h) \;\sim\; \mathfrak{S}(h)\,\frac{Q^2}{2},
+  \qquad Q \to \infty .
+\]
+In particular $\mathfrak{S}(0) = \prod_r (1 - r^{-2}) = 6/\pi^2$, since every
+prime divides $0$.
+\end{theorem}
+
+\begin{proof}
+Write $f(q) = R_q(h) = \prod_{r \mid q} \alpha_r$ with $\alpha_r = 1 - 1/r$ if
+$r \mid h$ and $\alpha_r = 1 - 2/r$ otherwise; by Theorem~\ref{thm:autocorr}
+this is multiplicative, bounded by $1$, and satisfies $f(r^e) = \alpha_r$ for
+all $e \ge 1$.
+
+Put $g = \mu * f$, so that $f = \mathbf{1} * g$. Then $g$ is multiplicative with
+$g(r) = \alpha_r - 1$ and $g(r^e) = f(r^e) - f(r^{e-1}) = 0$ for $e \ge 2$;
+hence $g$ is supported on squarefree integers, with
+$g(d) = \prod_{r \mid d}(\alpha_r - 1)$ there. Since
+$|\alpha_r - 1| \le 2/r$, we get $|g(d)| \le 2^{\omega(d)}/d$, so
+\begin{equation}\label{eq:gabs}
+  \sum_{d} \frac{|g(d)|}{d} \le \prod_r \left(1 + \frac{2}{r^2}\right) < \infty,
+  \qquad \sum_{d \le D} |g(d)| \le \sum_{d\le D} \frac{2^{\omega(d)}}{d} = O(\log^2 D).
+\end{equation}
+Therefore
+\[
+  \sum_{q \le Q} q\, f(q)
+  = \sum_{d \le Q} g(d)\, d \sum_{m \le Q/d} m
+  = \frac{Q^2}{2} \sum_{d \le Q} \frac{g(d)}{d}
+    + O\!\left( Q \sum_{d\le Q} |g(d)| \right)
+  = \frac{Q^2}{2} \sum_{d} \frac{g(d)}{d} + O(Q \log^2 Q),
+\]
+the tail being controlled by~\eqref{eq:gabs}. Finally, by multiplicativity,
+\[
+  \sum_{d} \frac{g(d)}{d}
+  = \prod_r \left(1 + \frac{\alpha_r - 1}{r}\right)
+  = \prod_r \left(1 - \frac1r + \frac{\alpha_r}{r}\right),
+\]
+and $1 - 1/r + \alpha_r/r$ equals $1 - r^{-2}$ when $r \mid h$ and $1 - 2r^{-2}$
+otherwise, which is~\eqref{eq:sing}.
+\end{proof}
+
+\begin{remark}[No parity obstruction]\label{rem:parity}
+Expression~\eqref{eq:sing} has the shape of a Hardy--Littlewood singular series
+with $r^2$ in place of $r$. The consequence is structural: the factor at $r = 2$
+is $1 - 2/4 = 1/2 \ne 0$ for odd $h$, so no factor of $\mathfrak{S}$ vanishes and
+the correlations are strictly positive for every lag. Even lags exceed odd lags
+by exactly the ratio
+$\mathfrak{S}(2)/\mathfrak{S}(1) = (1-\tfrac14)/(1-\tfrac12) = \tfrac32$. The
+novelty mask therefore has genuine arithmetic memory, increasing with the small
+prime divisors of the lag.
+\end{remark}
+
+\section{The prime-born partition}
+\label{sec:partition}
+
+Each rational in $(0,1)$ is born in exactly one frontier
+(Corollary~\ref{cor:bijection}). We may therefore partition $\Q \cap (0,1)$ by
+the primality of that frontier.
+
+\begin{definition}
+A reduced $a/b \in (0,1)$ is \emph{prime-born} if its birth frontier
+$Q = A(a+b)$ is prime, and \emph{composite-born} otherwise.
+\end{definition}
+
+\begin{proposition}[Criterion and density]\label{prop:primeborn}
+$a/b$ is prime-born if and only if $A(a+b)$ is prime. The proportion of
+prime-born values among those born in frontiers up to $x$ is
+\[
+  \frac{\sum_{q \le x,\ q \text{ prime}} (q-1)}{\sum_{q\le x} \varphi(q)}
+  \;\sim\; \frac{\pi^2}{6 \log x},
+\]
+so the prime-born set has natural density zero in this ordering.
+\end{proposition}
+
+\begin{proof}
+The criterion is Proposition~\ref{prop:occ}. A prime frontier $q$ contributes
+all of its $q-1$ entries, since $\varphi(q) = q-1$. By the prime number theorem
+and partial summation $\sum_{p \le x} (p-1) \sim x^2/(2\log x)$, while
+$\sum_{q\le x}\varphi(q) \sim 3x^2/\pi^2$. The ratio is
+$(\pi^2/6)/\log x$.
+\end{proof}
+
+Primes give \emph{complete} frontiers but are too sparse to carry positive
+density: completeness buys the constant $\pi^2/6$, sparsity costs a factor
+$\log x$.
+
+\begin{proposition}[Dirichlet decomposition]\label{prop:dirichlet}
+Weighting each novel value by its birth frontier, for $\Re s > 2$,
+\[
+  \sum_{\delta \text{ novel}} Q(\delta)^{-s}
+  = \sum_{q \ge 2} \varphi(q)\, q^{-s}
+  = \frac{\zeta(s-1)}{\zeta(s)} - 1 ,
+\]
+and this splits as
+\[
+  \underbrace{P(s-1) - P(s)}_{\text{prime-born}}
+  \;+\;
+  \underbrace{\frac{\zeta(s-1)}{\zeta(s)} - 1 - P(s-1) + P(s)}_{\text{composite-born}},
+\]
+where $P$ is the prime zeta function. At $s = 2$ the total has a simple pole
+with residue $6/\pi^2$, while the prime-born part has only a logarithmic
+singularity; this is Proposition~\ref{prop:primeborn} read off from the order of
+the singularity.
+\end{proposition}
+
+\begin{proof}
+$\sum_{q\ge1}\varphi(q)q^{-s} = \zeta(s-1)/\zeta(s)$ is classical; subtract the
+term $q=1$. The prime-born values are those with $Q$ prime, contributing
+$\sum_{r} (r-1) r^{-s} = P(s-1) - P(s)$.
+\end{proof}
+
+\begin{proposition}[The partition is invisible to the limiting measure]
+\label{prop:measures}
+Let $\mu_x$ be the uniform probability measure on the novel imbalances born in
+frontiers at most $x$, and $\mu_x^{\mathrm{pr}}$ the same for the prime-born
+ones. Then both converge weakly, as $x \to \infty$, to the measure on $(0,1)$
+with density
+\[
+  \frac{2}{(1+\delta)^2}\,d\delta .
+\]
+\end{proposition}
+
+\begin{proof}
+The Farey fractions of order $x$ equidistribute with respect to Lebesgue measure
+on $(0,1)$; for prime $q$ the frontier contributes the complete grid
+$\{p/q : 1 \le p \le q-1\}$, which also equidistributes, and prime frontiers are
+infinite in number. In both cases the ratios $p/q$ equidistribute uniformly, and
+the imbalances are their images under $\sigma(x) = (1-x)/(1+x)$. If $X$ is
+uniform on $(0,1)$ and $Y = \sigma(X)$ then $X = \sigma(Y)$ and
+$|dX/dY| = 2/(1+Y)^2$, which integrates to $1$ over $(0,1)$.
+\end{proof}
+
+Thus the two classes are distributionally identical and differ only in total
+mass. What \emph{is} visible at the level of a single frontier is finer, and is
+the correct statement of \eqref{eq:prime}: frontier $q$ is prime exactly when
+its measure is the complete uniform grid of spacing $1/q$, and composite
+frontiers are that grid punctured at the multiples of the prime divisors of $q$.
+Primality is minimal local discrepancy.
+
+\section{The induced metric on the primes}
+\label{sec:metric}
+
+\begin{proposition}[$\delta$ is a metric]\label{prop:metric}
+For $x,y > 0$ set $d(x,y) = |y-x|/(y+x)$, with $d(x,x)=0$. Then $d$ is a metric
+on $\R_{>0}$, and
+\[
+  d(x,y) = \tanh\!\left( \tfrac12 \left| \log \tfrac{y}{x} \right| \right).
+\]
+\end{proposition}
+
+\begin{proof}
+The identity is~\eqref{eq:artanh}. Symmetry and positivity are clear. For the
+triangle inequality, $\tanh$ is concave and increasing on $[0,\infty)$ with
+$\tanh 0 = 0$, hence subadditive: $\tanh(u+v) \le \tanh u + \tanh v$. Writing
+$\ell(x,y) = \tfrac12|\log(y/x)|$, which is a metric, and using monotonicity,
+\[
+  d(x,z) = \tanh \ell(x,z) \le \tanh\bigl(\ell(x,y)+\ell(y,z)\bigr)
+  \le \tanh\ell(x,y) + \tanh\ell(y,z) = d(x,y) + d(y,z). \qedhere
+\]
+\end{proof}
+
+Restrict $d$ to the set $\mathbb{P}$ of primes.
+
+\begin{proposition}[Structure of $(\mathbb{P},d)$]\label{prop:primespace}
+The space $(\mathbb{P}, d)$ is bounded of diameter $1$, the diameter not being
+attained; it is discrete and complete; it is not totally bounded; and it is not
+uniformly discrete, since
+\[
+  d(p_n, p_{n+1}) = \frac{g_n}{2p_n + g_n} \longrightarrow 0,
+  \qquad g_n = p_{n+1}-p_n .
+\]
+\end{proposition}
+
+\begin{proof}
+$d < 1$ always and $d(2, p) \to 1$ as $p \to \infty$, giving the diameter. A
+$d$-Cauchy sequence has $\log p_n$ Cauchy in $\R$, hence convergent, hence
+eventually constant since $\{\log p\}$ is discrete and closed in $\R$; so the
+space is discrete and complete. It is not totally bounded: $d(x,y)<\varepsilon$
+forces $\log(y/x)$ into a bounded interval, and $\{\log p\}$ is unbounded, so no
+finite family of $\varepsilon$-balls covers $\mathbb{P}$ for $\varepsilon < 1$.
+The gap formula is direct.
+\end{proof}
+
+\begin{proposition}[Twins, and the arithmetic of distances]\label{prop:twins}
+For primes $p < q$:
+\begin{enumerate}
+  \item $d(p,q)$ is always a novel imbalance, since $\gcd(p,q)=1$;
+  \item $q = p+2$ if and only if $d(p,q) = 1/(p+1)$;
+  \item if $p,q$ are odd, $d(p,q)$ is prime-born if and only if $(p+q)/2$ is
+    prime.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(i) is Theorem~\ref{thm:novelty}. (ii) $d(p,p+2) = 2/(2p+2) = 1/(p+1)$, and
+conversely $d$ determines the ratio $q/p$ and hence, with $p$ fixed, $q$. (iii)
+The birth frontier of $d(p,q)$ is $A(q+p)$, and for odd $p,q$ this is
+$(p+q)/2$; apply Proposition~\ref{prop:primeborn}.
+\end{proof}
+
+Part (iii) says the distance between two odd primes is prime-born exactly when
+their average is prime, i.e. exactly when $p+q = 2n$ with $n$ itself prime. This
+is a statement about which Goldbach representations have prime half-sum; it is
+not the Goldbach conjecture, and we claim nothing more for it.
+
+\section{Algorithms and complexity}
+\label{sec:algorithms}
+
+Throughout, $b$ denotes the bit length of the index $i$, and $M(b)$ the cost of
+$b$-bit multiplication.
+
+\begin{algorithm}[t]
+\caption{Positional access: the $i$-th entry}
+\label{alg:entry}
+\begin{algorithmic}[1]
+\Require $i \ge 0$
+\State $s \gets \isqrt(2i)$ \Comment{seed; any seed is admissible}
+\If{$s(s+1)/2 \le i$} $m \gets s$ \Else{} $m \gets s-1$ \EndIf
+  \Comment{integer certificate, Thm.~\ref{thm:seed}}
+\State $j \gets i - m(m+1)/2$
+\State \Return $(p,q) \gets (j+1,\, m+2)$ and $\delta \gets (m+1-j)/(m+3+j)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{The novelty mask on $[0,N)$, without gcd}
+\label{alg:mask}
+\begin{algorithmic}[1]
+\Require $N \ge 1$
+\State $Q \gets$ frontier of index $N-1$ \Comment{Algorithm~\ref{alg:entry}}
+\State sieve smallest prime factors up to $Q$ \Comment{linear sieve}
+\State $\nu_i \gets 1$ for all $i < N$
+\For{$q = 2, \dots, Q$}
+  \State $\text{base} \gets T_{q-2}$; factor $q$ from the spf table
+  \ForAll{primes $r \mid q$}
+    \For{$p = r, 2r, 3r, \dots < q$}
+      \State $\nu_{\text{base}+p-1} \gets 0$
+    \EndFor
+  \EndFor
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Linear-time mask]\label{thm:masklinear}
+Algorithm~\ref{alg:mask} is correct and runs in $O(N)$ word operations and
+$O(\sqrt N)$ space, invoking no gcd.
+\end{theorem}
+
+\begin{proof}
+Correctness is Theorem~\ref{thm:novelty}: within frontier $q$, the non-novel
+positions are exactly those $p$ divisible by some prime factor of $q$. The
+frontier labels reach $Q \asymp \sqrt{2N}$, so the sieve costs $O(\sqrt N)$ time
+and space. The number of marks is
+\[
+  \sum_{q \le Q}\ \sum_{r \mid q,\ r \text{ prime}} \frac{q}{r}
+  \;=\; \sum_{r \le Q} \frac1r \sum_{\substack{q \le Q\\ r \mid q}} q
+  \;\sim\; \frac{Q^2}{2}\sum_{r} \frac{1}{r^2}
+  \;\approx\; 0.4522\,\frac{Q^2}{2},
+\]
+using $\sum_r r^{-2} = P(2) \approx 0.4522$, against $T_{Q-1} \sim Q^2/2$
+indices. Hence $O(N)$ marks in total.
+\end{proof}
+
+\begin{algorithm}[t]
+\caption{Ordinal access: the $n$-th novel index}
+\label{alg:ordinal}
+\begin{algorithmic}[1]
+\Require $n \ge 1$
+\State $q \gets \lceil \pi\sqrt{n/3}\,\rceil$
+  \Comment{seed from $\Phi_\Sigma(Q) \sim 3Q^2/\pi^2$}
+\While{$\Phi_\Sigma(q) - 1 < n$} $q \gets q+1$ \EndWhile
+\While{$q > 2$ \textbf{and} $\Phi_\Sigma(q-1) - 1 \ge n$} $q \gets q-1$ \EndWhile
+\State $r \gets n - (\Phi_\Sigma(q-1) - 1)$ \Comment{rank within frontier $q$}
+\State $p \gets$ the $r$-th integer in $[1,q)$ coprime to $q$
+  \Comment{binary search on $\sum_{d \mid \rad(q)} \mu(d)\lfloor x/d\rfloor$}
+\State \Return $T_{q-2} + p - 1$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{theorem}[Cost of ordinal access]\label{thm:ordinal}
+Algorithm~\ref{alg:ordinal} returns the $n$-th novel index in
+$O(n^{1/3+\varepsilon})$ time and $O(n^{1/4})$ space.
+\end{theorem}
+
+\begin{proof}
+By Proposition~\ref{prop:farey} the novel entries in frontiers up to $q$ number
+$\Phi_\Sigma(q)-1$, so the loop terminates at the correct frontier. Evaluating
+$\Phi_\Sigma(x)$ by the hyperbola recurrence
+$\sum_{k \le x} \Phi_\Sigma(\lfloor x/k\rfloor) = T_x$, memoised over the
+$O(\sqrt x)$ distinct values of $\lfloor x/k \rfloor$, costs $O(x^{2/3})$ time
+and $O(\sqrt x)$ space. Here $q \asymp \sqrt n$, giving $O(n^{1/3})$ and
+$O(n^{1/4})$. The totative search evaluates a sum over the $2^{\omega(q)}
+= q^{o(1)}$ squarefree divisors of $q$, $O(\log q)$ times.
+\end{proof}
+
+\begin{table}[t]
+\centering
+\caption{Cost of each access pattern. Only ordinal access is genuinely
+arithmetic; the others are combinatorial and certify in two multiplications.}
+\label{tab:costs}
+\begin{tabular}{llll}
+\toprule
+Operation & Method & Cost & gcd? \\
+\midrule
+$i \mapsto (p,q)$, unreduced $\delta_i$ & Alg.~\ref{alg:entry} & $O(M(b))$ & no \\
+streaming & Cor.~\ref{cor:stream} & $O(1)$ amortised & no \\
+lowest terms, $i$ novel & $\Phi$, Thm.~\ref{thm:involution} & $O(b)$ & no \\
+lowest terms, streaming & $\Phi$ + per-frontier factorisation & $O(\omega(q))$ divisions & no Euclid \\
+lowest terms, arbitrary $i$ & Prop.~\ref{prop:lowest} & $O(M(b)\log b)$ & yes \\
+reduced $a/b \mapsto$ novel index & Prop.~\ref{prop:occ} & $O(M(b))$ & no \\
+novelty mask on $[0,N)$ & Alg.~\ref{alg:mask} & $O(N)$, $O(\sqrt N)$ space & no \\
+$n \mapsto n$-th novel index & Alg.~\ref{alg:ordinal} & $O(n^{1/3+\varepsilon})$ & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:costs} exhibits the asymmetry that we regard as the operational
+content of the construction. Addressing a novel term by \emph{name} --- its
+rational value --- is cheap in both directions and symmetric, dominated by a
+square root one way and a squaring the other. Addressing it by \emph{position}
+costs a totient summatory computation. The bijection of
+Corollary~\ref{cor:bijection} is explicit; its ordering is not.
+
+\section{Numerical verification}
+\label{sec:numerics}
+
+A reference implementation accompanies this paper; all statements below were
+checked against it.
+
+\paragraph{Indexing and trails.} Algorithm~\ref{alg:entry} agrees with the
+streaming recurrence of Corollary~\ref{cor:stream} for all $i < 2\cdot10^5$, and
+reproduces Table~\ref{tab:first} entry by entry. The occurrence trails of
+Example~\ref{ex:trails} and their second differences $4,9,16$ are confirmed, as
+are the two progressions of Corollary~\ref{cor:unit} and the four progressions
+predicted by Theorem~\ref{thm:progressions} for $a = 3$.
+
+\paragraph{Mask and ordinal access.} Algorithm~\ref{alg:mask} agrees with the
+gcd definition on $[0, 3\cdot 10^5)$, with empirical novelty density
+$0.60991$ against $6/\pi^2 = 0.60793$. Algorithm~\ref{alg:ordinal} agrees with
+the sieve for all sampled ranks up to $n = 1.2\cdot10^6$; at
+$n = 10^{15}$ it returns $1\,644\,934\,015\,772\,573$ in under half a second,
+against the prediction $n\pi^2/6 = 1.6449\cdots\times10^{15}$.
+
+\paragraph{Spectral quantities.} Expansion~\eqref{eq:ram} reproduces $\nu$
+exactly for all $q < 60$; the support claim of Corollary~\ref{cor:radical} is
+confirmed, including that $q = 8$ and $q = 2$ have identical spectra, and the
+primality criterion holds for all $q < 50$. Formula~\eqref{eq:autocorr} agrees
+with direct counting for all $q < 80$ and all lags.
+
+\paragraph{The singular series.} Table~\ref{tab:singular} compares
+$\bigl(\sum_{q\le Q} q R_q(h)\bigr)/(Q^2/2)$ at $Q = 20\,000$ with
+$\mathfrak{S}(h)$ of Theorem~\ref{thm:singular}.
+
+\begin{table}[h]
+\centering
+\caption{Empirical mean of $R_q(h)$ at $Q = 20\,000$ against $\mathfrak{S}(h)$.}
+\label{tab:singular}
+\begin{tabular}{rlll}
+\toprule
+$h$ & empirical & $\mathfrak{S}(h)$ & ratio \\
+\midrule
+$0$  & $0.607952$ & $0.607927$ & $1.00004$ \\
+$1$  & $0.322656$ & $0.322634$ & $1.00007$ \\
+$2$  & $0.483979$ & $0.483952$ & $1.00006$ \\
+$3$  & $0.368735$ & $0.368725$ & $1.00003$ \\
+$6$  & $0.553105$ & $0.553087$ & $1.00003$ \\
+$30$ & $0.577153$ & $0.577135$ & $1.00003$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The row $h=0$ returns $6/\pi^2$ as required, and
+$\mathfrak{S}(2)/\mathfrak{S}(1) = 1.4999$, confirming
+Remark~\ref{rem:parity}.
+
+\paragraph{The prime-born partition.} Convergence in
+Proposition~\ref{prop:primeborn} is slow, being of order $1/\log x$, and not
+monotone at small scales:
+
+\begin{center}
+\begin{tabular}{rrrrr}
+\toprule
+$x$ & novel & prime-born & fraction & $\pi^2/(6\log x)$ \\
+\midrule
+$50$  & $773$   & $313$   & $0.4049$ & $0.4205$ \\
+$100$ & $3043$  & $1035$  & $0.3401$ & $0.3572$ \\
+$200$ & $12231$ & $4181$  & $0.3418$ & $0.3105$ \\
+$400$ & $48677$ & $13809$ & $0.2837$ & $0.2745$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Limitations}
+\label{sec:limits}
+
+We state plainly what the construction does not achieve.
+
+\begin{enumerate}
+  \item \emph{No new arithmetic.} Identities \eqref{eq:phi}--\eqref{eq:spf} and
+    the twin-prime equivalence of Remark~\ref{rem:honest} are exact
+    reformulations. The novelty mask is defined through $\gcd$, so it is not a
+    cheaper route to factorisation; Theorem~\ref{thm:masklinear} shows only that
+    the two representations are interconvertible in linear time.
+  \item \emph{The prime-born partition is isomorphic to the prime/composite
+    partition of $\N$}, by Corollary~\ref{cor:bijection}. Every statement about
+    it is a translation, and Proposition~\ref{prop:measures} shows it is
+    invisible to the natural limiting measure.
+  \item \emph{Ordinal access admits no closed form.} By
+    Proposition~\ref{prop:farey}, locating the $n$-th novel index requires
+    $\Phi_\Sigma$ exactly, whose error term is
+    $\Omega_\pm(x \log\log\log x)$ by Montgomery \cite{Montgomery1987} and is
+    not known in order. Theorem~\ref{thm:ordinal} is therefore essentially the
+    best available, and no radical expression in $n$ can exist. This is a
+    genuine obstruction, not a gap in the present treatment.
+  \item \emph{The dynamical framing is empty.} Proposition~\ref{prop:degenerate}
+    holds for every deterministic sequence whatsoever. We retain the chain
+    language only because Theorem~\ref{thm:order2} gives it content at the level
+    of the scalar sequence.
+  \item \emph{The metric of Section~\ref{sec:metric} is $\log$ in disguise},
+    being $\tanh$ of half the logarithmic distance. Only
+    Proposition~\ref{prop:twins}(iii), which ties prime-bornness of a distance to
+    the primality of a half-sum, uses the arithmetic of the imbalance rather
+    than the topology of the logarithm.
+\end{enumerate}
+
+\section{Open questions}
+
+\begin{enumerate}
+  \item Determine the second-order term in
+    Proposition~\ref{prop:primeborn}, i.e. the size of the fluctuation visible
+    in the table of Section~\ref{sec:numerics}.
+  \item Is the exponent $1/3$ in Theorem~\ref{thm:ordinal} optimal for ordinal
+    access, given the best known bounds for $\Phi_\Sigma$?
+  \item The correlation $\mathfrak{S}(h)$ of Theorem~\ref{thm:singular} is a
+    singular series without parity obstruction. Does the corresponding point
+    process of novel indices have a limiting pair-correlation function, and is it
+    the one predicted by $\mathfrak{S}$?
+  \item In the applied reading of $\delta$ as a normalised queue imbalance with
+    bounded integer queues, Theorem~\ref{thm:novelty} says the observable
+    determines the pair only up to scale, and Theorem~\ref{thm:order2} says two
+    consecutive observations suffice. Quantify the resulting quantisation:
+    which imbalance values are attainable at depth $N$, with what multiplicities,
+    and what is the induced discretisation error?
+\end{enumerate}
+
+\section*{Acknowledgements}
+
+The author thanks Michel Marcus and Yasushi Ieno for corrections to the earlier
+note \cite{Bilokon2025}.
+
+\begin{thebibliography}{99}
+
+\bibitem{Apostol1976} T. M. Apostol.
+  \emph{Introduction to Analytic Number Theory}. Springer, New York, 1976.
+
+\bibitem{Bilokon2025} P. A. Bilokon.
+  A sieve on rational imbalances and the first appearance of denominators.
+  SSRN preprint 5662230, 2025.
+
+\bibitem{BrentZimmermann2021} R. P. Brent and P. Zimmermann.
+  \emph{Modern Computer Arithmetic}. Cambridge University Press, 2nd ed., 2021.
+
+\bibitem{Brocot1861} A. Brocot.
+  Calcul des rouages par approximation, nouvelle m\'ethode.
+  \emph{Revue Chronom\'etrique}, 3:186--194, 1861.
+
+\bibitem{CalkinWilf2000} N. Calkin and H. S. Wilf.
+  Recounting the rationals. \emph{Amer. Math. Monthly}, 107(4):360--363, 2000.
+
+\bibitem{GrahamKnuthPatashnik1994} R. L. Graham, D. E. Knuth and O. Patashnik.
+  \emph{Concrete Mathematics}. Addison-Wesley, 2nd ed., 1994.
+
+\bibitem{HardyWright2008} G. H. Hardy and E. M. Wright.
+  \emph{An Introduction to the Theory of Numbers}. Oxford University Press,
+  6th ed., 2008.
+
+\bibitem{IwaniecKowalski2004} H. Iwaniec and E. Kowalski.
+  \emph{Analytic Number Theory}. AMS Colloquium Publications 53, 2004.
+
+\bibitem{Farey1816} J. Farey.
+  On a curious property of vulgar fractions.
+  \emph{Philosophical Magazine}, 47:385--386, 1816.
+
+\bibitem{Montgomery1987} H. L. Montgomery.
+  Fluctuations in the mean of Euler's phi function.
+  \emph{Proc. Indian Acad. Sci. Math. Sci.}, 97:239--245, 1987.
+
+\bibitem{OEIS_A026741} OEIS Foundation Inc.
+  Sequence A026741, \emph{The On-Line Encyclopedia of Integer Sequences},
+  \url{https://oeis.org/A026741}.
+
+\bibitem{Ramanujan1918} S. Ramanujan.
+  On certain trigonometrical sums and their applications in the theory of
+  numbers. \emph{Trans. Cambridge Philos. Soc.}, 22:259--276, 1918.
+
+\bibitem{Schwarz1994} W. Schwarz and J. Spilker.
+  \emph{Arithmetical Functions}. London Math. Soc. Lecture Notes 184,
+  Cambridge University Press, 1994.
+
+\bibitem{Stern1858} M. A. Stern.
+  \"Uber eine zahlentheoretische Funktion.
+  \emph{J. Reine Angew. Math.}, 55:193--220, 1858.
+
+\end{thebibliography}
+
+\end{document}

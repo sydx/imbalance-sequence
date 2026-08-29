@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "imbalance-seq"
+version = "0.1.0"
+description = "The imbalance sequence (q-p)/(q+p): indexing, novelty, and spectral structure"
+authors = [{name = "Paul A. Bilokon"}]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = ["slow: longer-running scaling and asymptotic checks"]
